@@ -16,7 +16,6 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 
 int main(void)
 {
-
 	GLFWwindow *window;
 	GLFWmonitor *primary;
 	std::vector<cl::Platform> platforms;
@@ -24,7 +23,6 @@ int main(void)
 	cl::Platform plat;
 	unsigned int nr_particles = 500;
 	std::vector<Particle> particles;
-
 	for (unsigned int i = 0; i < nr_particles; ++i)
 		particles.push_back(Particle());
 	for (auto &p : platforms)
@@ -45,6 +43,9 @@ int main(void)
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
+
+	Buffer buf;
+
 	const GLFWvidmode *mode = glfwGetVideoMode(primary);
 	window = glfwCreateWindow(mode->width, mode->height, "ft_vox", primary, NULL);
 
@@ -57,6 +58,8 @@ int main(void)
 	gl3wInit();
 	glfwSetCursorPosCallback(window, mouse_callback);
 	glfwSetScrollCallback(window, scroll_callback);
+
+	buf.loadVBO();
 
 	Shader shader("./shaders/vertex.glsl", "./shaders/fragment.glsl");
 
@@ -78,19 +81,19 @@ int main(void)
 
 		processInput(window);
 
-		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
+		glPointSize(10);
 		shader.use();
-		glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 1000.0f);
-		shader.setMat4("projection", projection);
-		glm::mat4 view = camera.GetViewMatrix();
-		shader.setMat4("view", view);
-		shader.setVec3("viewPos", camera.Position);
-
-		//shader.setMat4("model", it->second->mat);
-		//glBindVertexArray(it->second->VAO);
-		//glDrawArrays(GL_TRIANGLES, 0, it->second->size / 3);
+		//glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 1000.0f);
+		//shader.setMat4("projection", projection);
+		//glm::mat4 view = camera.GetViewMatrix();
+		//shader.setMat4("view", view);
+		//shader.setVec3("viewPos", camera.Position);
+		shader.setVec3("p", glm::vec3(0.0, 0.5, 0.0));
+		//shader.setMat4("model", buf.mat);
+		glBindVertexArray(buf.VAO);
+		glDrawArrays(GL_POINTS, 1, 1);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
@@ -160,3 +163,86 @@ void scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
 	(void)xoffset;
 	camera.ProcessMouseScroll(yoffset);
 }
+
+/*int main()
+{
+	//get all platforms (drivers)
+	std::vector<cl::Platform> all_platforms;
+	cl::Platform::get(&all_platforms);
+	if (all_platforms.size() == 0)
+	{
+		std::cout << " No platforms found. Check OpenCL installation!\n";
+		exit(1);
+	}
+	cl::Platform default_platform = all_platforms[0];
+	std::cout << "Using platform: " << default_platform.getInfo<CL_PLATFORM_NAME>() << "\n";
+
+	//get default device of the default platform
+	std::vector<cl::Device> all_devices;
+	default_platform.getDevices(CL_DEVICE_TYPE_ALL, &all_devices);
+	if (all_devices.size() == 0)
+	{
+		std::cout << " No devices found. Check OpenCL installation!\n";
+		exit(1);
+	}
+	cl::Device default_device = all_devices[0];
+	std::cout << "Using device: " << default_device.getInfo<CL_DEVICE_NAME>() << "\n";
+
+	cl::Context context({default_device});
+
+	cl::Program::Sources sources;
+
+	// kernel calculates for each element C=A+B
+	std::string kernel_code =
+		"   void kernel simple_add(global const int* A, global const int* B, global int* C){       "
+		"       C[get_global_id(0)]=A[get_global_id(0)]+B[get_global_id(0)];                 "
+		"   }                                                                               ";
+	sources.push_back({kernel_code.c_str(), kernel_code.length()});
+
+	cl::Program program(context, sources);
+	if (program.build({default_device}) != CL_SUCCESS)
+	{
+		std::cout << " Error building: " << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(default_device) << "\n";
+		exit(1);
+	}
+
+	// create buffers on the device
+	cl::Buffer buffer_A(context, CL_MEM_READ_WRITE, sizeof(int) * 10);
+	cl::Buffer buffer_B(context, CL_MEM_READ_WRITE, sizeof(int) * 10);
+	cl::Buffer buffer_C(context, CL_MEM_READ_WRITE, sizeof(int) * 10);
+
+	int A[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+	int B[] = {0, 1, 2, 0, 1, 2, 0, 1, 2, 0};
+
+	//create queue to which we will push commands for the device.
+	cl::CommandQueue queue(context, default_device);
+
+	//write arrays A and B to the device
+	queue.enqueueWriteBuffer(buffer_A, CL_TRUE, 0, sizeof(int) * 10, A);
+	queue.enqueueWriteBuffer(buffer_B, CL_TRUE, 0, sizeof(int) * 10, B);
+
+	//run the kernel
+
+	//cl::KernelFunctor simple_add(cl::Kernel(program, "simple_add"), queue, cl::NullRange, cl::NDRange(10), cl::NullRange);
+	//simple_add(buffer_A, buffer_B, buffer_C);
+
+	//alternative way to run the kernel
+	cl::Kernel kernel_add = cl::Kernel(program, "simple_add");
+	kernel_add.setArg(0, buffer_A);
+	kernel_add.setArg(1, buffer_B);
+	kernel_add.setArg(2, buffer_C);
+	queue.enqueueNDRangeKernel(kernel_add, cl::NullRange, cl::NDRange(10), cl::NullRange);
+	queue.finish();
+
+	int C[10];
+	//read result C from the device to array C
+	queue.enqueueReadBuffer(buffer_C, CL_TRUE, 0, sizeof(int) * 10, C);
+
+	std::cout << " result: \n";
+	for (int i = 0; i < 10; i++)
+	{
+		std::cout << C[i] << " ";
+	}
+
+	return 0;
+}*/

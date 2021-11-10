@@ -1,11 +1,11 @@
 NAME	= ft_vox
 
-SRCS 	= ./srcs/main.cpp
+SRCS 	= ./srcs/main.cpp ./srcs/buffer.cpp
 
 OBJ_DIR = ./.objs
 SRC_DIR = ./srcs
 INC_DIR = ./include
-INC_HDR =	-I./ -I./glfw/include -I./gl3w/include/GL -I./OpenCL-CLHPP/include/ -I./OpenCL-Headers/include
+INC_HDR =	-I./ -I./glfw/include -I./gl3w/include/GL -I./OpenCL-CLHPP/include/ -I./OpenCL-Headers/include -I./headers/
 INC_LIB =	-L./glfw/src -lglfw3 -lpthread -pthread \
 			-framework OpenGL -framework AppKit -framework Cocoa -framework IOKit -framework CoreVideo -framework OpenCL
 INC_H	= ./headers/vox.hpp ./headers/shader.hpp ./headers/camera.hpp

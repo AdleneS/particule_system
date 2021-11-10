@@ -22,6 +22,7 @@
 
 #include "shader.hpp"
 #include "camera.hpp"
+#include <buffer.hpp>
 
 #include "../glfw/include/GLFW/glfw3.h"
 #include <CL/opencl.hpp>
