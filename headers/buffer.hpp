@@ -5,7 +5,7 @@
 #include <cstdio>
 
 const float pos[] = {
-    50.0, -50.0, 50.0};
+    0.5, 0.0, 0.0};
 
 class Buffer
 {

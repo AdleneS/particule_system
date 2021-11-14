@@ -1,5 +1,18 @@
 #include "../headers/vox.hpp"
 
+const char *cSourceCL = "__kernel void sine_wave(__global float4* pos, unsigned int width, unsigned int height, float time)\n"
+						"{\n"
+						"unsigned int x = get_global_id(0);\n"
+						"unsigned int y = get_global_id(1);\n"
+						"float u = x / (float) width;\n"
+						"float v = y / (float) height;\n"
+						"u = u*2.0f - 1.0f;\n"
+						"v = v*2.0f - 1.0f;\n"
+						"float freq = 4.0f;\n"
+						"float w = sin(u*freq + time) * cos(v*freq + time) * 0.5f;\n"
+						"pos[y*width+x] = (float4)(u, w, v, 1.0f);\n"
+						"}\n";
+
 static void error_callback(int error, const char *description)
 {
 	(void)error;
@@ -18,21 +31,8 @@ int main(void)
 {
 	GLFWwindow *window;
 	GLFWmonitor *primary;
-	std::vector<cl::Platform> platforms;
-	cl::Platform::get(&platforms);
-	cl::Platform plat;
+
 	unsigned int nr_particles = 500;
-	std::vector<Particle> particles;
-	for (unsigned int i = 0; i < nr_particles; ++i)
-		particles.push_back(Particle());
-	for (auto &p : platforms)
-	{
-		std::string platver = p.getInfo<CL_PLATFORM_VERSION>();
-		if (platver.find("OpenCL 2.") != std::string::npos)
-		{
-			plat = p;
-		}
-	}
 
 	if (!glfwInit())
 		exit(EXIT_FAILURE);
@@ -72,6 +72,82 @@ int main(void)
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	// Get the NVIDIA platform
+	ciErrNum = getPlatformID(&cpPlatform);
+
+	// Get the number of GPU devices available to the platform
+	ciErrNum = clGetDeviceIDs(cpPlatform, CL_DEVICE_TYPE_GPU, 0, NULL, &uiDevCount);
+
+	// Create the device list
+	cdDevices = new cl_device_id[uiDevCount];
+	ciErrNum = clGetDeviceIDs(cpPlatform, CL_DEVICE_TYPE_GPU, uiDevCount, cdDevices, NULL);
+
+	// Get device requested on command line, if any
+	unsigned int uiDeviceUsed = 0;
+	unsigned int uiEndDev = uiDevCount - 1;
+
+	bool bSharingSupported = false;
+	for (unsigned int i = uiDeviceUsed; (!bSharingSupported && (i <= uiEndDev)); ++i)
+	{
+		size_t extensionSize;
+		ciErrNum = clGetDeviceInfo(cdDevices[i], CL_DEVICE_EXTENSIONS, 0, NULL, &extensionSize);
+		if (extensionSize > 0)
+		{
+			char *extensions = (char *)malloc(extensionSize);
+			ciErrNum = clGetDeviceInfo(cdDevices[i], CL_DEVICE_EXTENSIONS, extensionSize, extensions, &extensionSize);
+			std::string stdDevString(extensions);
+			free(extensions);
+
+			size_t szOldPos = 0;
+			size_t szSpacePos = stdDevString.find(' ', szOldPos); // extensions string is space delimited
+			while (szSpacePos != stdDevString.npos)
+			{
+				if (strcmp(GL_SHARING_EXTENSION, stdDevString.substr(szOldPos, szSpacePos - szOldPos).c_str()) == 0)
+				{
+					// Device supports context sharing with OpenGL
+					uiDeviceUsed = i;
+					bSharingSupported = true;
+					break;
+				}
+				do
+				{
+					szOldPos = szSpacePos + 1;
+					szSpacePos = stdDevString.find(' ', szOldPos);
+				} while (szSpacePos == szOldPos);
+			}
+		}
+	}
+
+// Define OS-specific context properties and create the OpenCL context
+#if defined(__APPLE__)
+	CGLContextObj kCGLContext = CGLGetCurrentContext();
+	CGLShareGroupObj kCGLShareGroup = CGLGetShareGroup(kCGLContext);
+	cl_context_properties props[] =
+		{
+			CL_CONTEXT_PROPERTY_USE_CGL_SHAREGROUP_APPLE, (cl_context_properties)kCGLShareGroup,
+			0};
+	cxGPUContext = clCreateContext(props, 0, 0, NULL, NULL, &ciErrNum);
+#else
+#ifdef UNIX
+	cl_context_properties props[] =
+		{
+			CL_GL_CONTEXT_KHR, (cl_context_properties)glXGetCurrentContext(),
+			CL_GLX_DISPLAY_KHR, (cl_context_properties)glXGetCurrentDisplay(),
+			CL_CONTEXT_PLATFORM, (cl_context_properties)cpPlatform,
+			0};
+	cxGPUContext = clCreateContext(props, 1, &cdDevices[uiDeviceUsed], NULL, NULL, &ciErrNum);
+#else // Win32
+	cl_context_properties props[] =
+		{
+			CL_GL_CONTEXT_KHR, (cl_context_properties)wglGetCurrentContext(),
+			CL_WGL_HDC_KHR, (cl_context_properties)wglGetCurrentDC(),
+			CL_CONTEXT_PLATFORM, (cl_context_properties)cpPlatform,
+			0};
+	cxGPUContext = clCreateContext(props, 1, &cdDevices[uiDeviceUsed], NULL, NULL, &ciErrNum);
+#endif
+#endif
+
+	cqCommandQueue = clCreateCommandQueue(cxGPUContext, cdDevices[uiDeviceUsed], 0, &ciErrNum);
 
 	while (!glfwWindowShouldClose(window))
 	{
@@ -85,15 +161,15 @@ int main(void)
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glPointSize(10);
 		shader.use();
-		//glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 1000.0f);
-		//shader.setMat4("projection", projection);
-		//glm::mat4 view = camera.GetViewMatrix();
-		//shader.setMat4("view", view);
-		//shader.setVec3("viewPos", camera.Position);
+		// glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 1000.0f);
+		// shader.setMat4("projection", projection);
+		// glm::mat4 view = camera.GetViewMatrix();
+		// shader.setMat4("view", view);
+		// shader.setVec3("viewPos", camera.Position);
 		shader.setVec3("p", glm::vec3(0.0, 0.5, 0.0));
-		//shader.setMat4("model", buf.mat);
+		// shader.setMat4("model", buf.mat);
 		glBindVertexArray(buf.VAO);
-		glDrawArrays(GL_POINTS, 1, 1);
+		glDrawArrays(GL_POINTS, 0, 1);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
@@ -162,6 +238,90 @@ void scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
 	(void)window;
 	(void)xoffset;
 	camera.ProcessMouseScroll(yoffset);
+}
+
+void Cleanup(int iExitCode)
+{
+	// Cleanup allocated objects
+	if (ckKernel)
+		clReleaseKernel(ckKernel);
+	if (cpProgram)
+		clReleaseProgram(cpProgram);
+	if (cqCommandQueue)
+		clReleaseCommandQueue(cqCommandQueue);
+	if (vbo)
+	{
+		glBindBuffer(1, vbo);
+		glDeleteBuffers(1, &vbo);
+		vbo = 0;
+	}
+	if (vbo_cl)
+		clReleaseMemObject(vbo_cl);
+	if (cxGPUContext)
+		clReleaseContext(cxGPUContext);
+	if (cPathAndName)
+		free(cPathAndName);
+	// if (cSourceCL)
+	//	free(cSourceCL);
+	if (cdDevices)
+		delete (cdDevices);
+
+	exit(iExitCode);
+}
+
+cl_int getPlatformID(cl_platform_id *clSelectedPlatformID)
+{
+	char chBuffer[1024];
+	cl_uint num_platforms;
+	cl_platform_id *clPlatformIDs;
+	cl_int ciErrNum;
+	*clSelectedPlatformID = NULL;
+
+	// Get OpenCL platform count
+	ciErrNum = clGetPlatformIDs(0, NULL, &num_platforms);
+	if (ciErrNum != CL_SUCCESS)
+	{
+		return -1000;
+	}
+	else
+	{
+		if (num_platforms == 0)
+		{
+			return -2000;
+		}
+		else
+		{
+			// if there's a platform or more, make space for ID's
+			if ((clPlatformIDs = (cl_platform_id *)malloc(num_platforms * sizeof(cl_platform_id))) == NULL)
+			{
+				return -3000;
+			}
+
+			ciErrNum = clGetPlatformIDs(num_platforms, clPlatformIDs, NULL);
+			for (cl_uint i = 0; i < num_platforms; ++i)
+			{
+				ciErrNum = clGetPlatformInfo(clPlatformIDs[i], CL_PLATFORM_NAME, 1024, &chBuffer, NULL);
+				if (ciErrNum == CL_SUCCESS)
+				{
+					if (strstr(chBuffer, "NVIDIA") != NULL)
+					{
+						*clSelectedPlatformID = clPlatformIDs[i];
+						break;
+					}
+				}
+			}
+
+			// default to zeroeth platform if NVIDIA not found
+			if (*clSelectedPlatformID == NULL)
+			{
+				*clSelectedPlatformID = clPlatformIDs[0];
+			}
+
+			free(clPlatformIDs);
+		}
+	}
+
+	return CL_SUCCESS;
 }
 
 /*int main()
