@@ -64,10 +64,12 @@ void processInput(GLFWwindow *window);
 void Cleanup(int iExitCode);
 void (*pCleanup)(int) = &Cleanup;
 cl_int getPlatformID(cl_platform_id *clSelectedPlatformID);
+void runKernel();
+char *oclLoadProgSource(const char *cFilename, const char *cPreamble, size_t *szFinalLength);
 
 unsigned int SCR_WIDTH = 1920;
 unsigned int SCR_HEIGHT = 1080;
-Camera camera(glm::vec3(0.0f, 128.0f, 0.0f));
+Camera camera(glm::vec3(0.0f, 0.0f, 0.0f));
 float lastX = SCR_WIDTH / 2.0f;
 float lastY = SCR_HEIGHT / 2.0f;
 bool firstMouse = true;
@@ -77,6 +79,9 @@ float lastFrame = 0.0f;
 bool stop = false;
 
 GLuint vbo;
+GLuint vao;
+const unsigned int mesh_width = 1000;
+const unsigned int mesh_height = 1000;
 // OpenCL vars
 cl_platform_id cpPlatform;
 cl_context cxGPUContext;
@@ -88,8 +93,10 @@ cl_mem vbo_cl;
 cl_program cpProgram;
 cl_int ciErrNum;
 char *cPathAndName = NULL; // var for full paths to data, src, etc.
-// char *cSourceCL = NULL;    // Buffer to hold source for compilation
-size_t szGlobalWorkSize[] = {SCR_WIDTH, SCR_HEIGHT};
+char *cSourceCL = NULL;    // Buffer to hold source for compilation
+size_t szGlobalWorkSize[] = {mesh_width, mesh_height};
 const char *cExecutableName = NULL;
+
+float anim = 0.0;
 
 #endif

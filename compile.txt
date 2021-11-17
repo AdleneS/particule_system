@@ -1,4 +1,4 @@
 g++ ./srcs/main.cpp \
 ./srcs/buffer.cpp \
 -o vox -I./ -I./glfw/include -I./gl3w/include/GL -I./OpenCL-Headers/ -I./headers/ \
--pthread -lopengl32 -lglu32 -lgdi32 -luser32 -lkernel32 -lglfw3dll -lfreetype -O3 -lOpenCL
+-lopengl32 -lglu32 -lgdi32 -luser32 -lkernel32 -lglfw3dll -lfreetype -O3 -lOpenCL

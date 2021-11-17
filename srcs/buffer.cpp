@@ -14,12 +14,12 @@ Buffer::~Buffer()
 
 void Buffer::deleteVBO()
 {
-    //glDeleteBuffers(1, &VBO);
-    //glDeleteVertexArrays(1, &VAO);
+    // glDeleteBuffers(1, &VBO);
+    // glDeleteVertexArrays(1, &VAO);
 }
 void Buffer::loadVBO()
 {
-    //printf("%d\n", chunk.Vertices.size());
+    // printf("%d\n", chunk.Vertices.size());
     glGenVertexArrays(1, &VAO);
     glBindVertexArray(VAO);
     glGenBuffers(1, &VBO);

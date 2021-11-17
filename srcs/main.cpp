@@ -1,17 +1,17 @@
 #include "../headers/vox.hpp"
 
-const char *cSourceCL = "__kernel void sine_wave(__global float4* pos, unsigned int width, unsigned int height, float time)\n"
-						"{\n"
-						"unsigned int x = get_global_id(0);\n"
-						"unsigned int y = get_global_id(1);\n"
-						"float u = x / (float) width;\n"
-						"float v = y / (float) height;\n"
-						"u = u*2.0f - 1.0f;\n"
-						"v = v*2.0f - 1.0f;\n"
-						"float freq = 4.0f;\n"
-						"float w = sin(u*freq + time) * cos(v*freq + time) * 0.5f;\n"
-						"pos[y*width+x] = (float4)(u, w, v, 1.0f);\n"
-						"}\n";
+// const char *cSourceCL = "__kernel void sine_wave(__global float4* pos, unsigned int width, unsigned int height, float time)\n"
+//						"{\n"
+//						"unsigned int x = get_global_id(0);\n"
+//						"unsigned int y = get_global_id(1);\n"
+//						"float u = x / (float) width;\n"
+//						"float v = y / (float) height;\n"
+//						"u = u*2.0f - 1.0f;\n"
+//						"v = v*2.0f - 1.0f;\n"
+//						"float freq = 4.0f;\n"
+//						"float w = sin(u*freq + time) * cos(v*freq + time) * 0.5f;\n"
+//						"pos[y*width+x] = (float4)(u, w, v, 1.0f);\n"
+//						"}\n";
 
 static void error_callback(int error, const char *description)
 {
@@ -44,8 +44,6 @@ int main(void)
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
 
-	Buffer buf;
-
 	const GLFWvidmode *mode = glfwGetVideoMode(primary);
 	window = glfwCreateWindow(mode->width, mode->height, "ft_vox", primary, NULL);
 
@@ -59,8 +57,6 @@ int main(void)
 	glfwSetCursorPosCallback(window, mouse_callback);
 	glfwSetScrollCallback(window, scroll_callback);
 
-	buf.loadVBO();
-
 	Shader shader("./shaders/vertex.glsl", "./shaders/fragment.glsl");
 
 	glfwMakeContextCurrent(window);
@@ -70,9 +66,9 @@ int main(void)
 	shader.use();
 
 	glEnable(GL_DEPTH_TEST);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	// Get the NVIDIA platform
+	// glEnable(GL_BLEND);
+	//  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	//   Get the NVIDIA platform
 	ciErrNum = getPlatformID(&cpPlatform);
 
 	// Get the number of GPU devices available to the platform
@@ -147,7 +143,41 @@ int main(void)
 #endif
 #endif
 
+	size_t program_length;
 	cqCommandQueue = clCreateCommandQueue(cxGPUContext, cdDevices[uiDeviceUsed], 0, &ciErrNum);
+	cSourceCL = oclLoadProgSource("./resources/simple.cl", "", &program_length);
+
+	// create the program
+	cpProgram = clCreateProgramWithSource(cxGPUContext, 1,
+										  (const char **)&cSourceCL, &program_length, &ciErrNum);
+
+	// build the program
+	ciErrNum = clBuildProgram(cpProgram, 0, NULL, "-cl-fast-relaxed-math", NULL, NULL);
+
+	// create the kernel
+	ckKernel = clCreateKernel(cpProgram, "sine_wave", &ciErrNum);
+
+	// create VBO (if using standard GL or CL-GL interop), otherwise create Cl buffer
+	unsigned int size = mesh_width * mesh_height * 4 * sizeof(float);
+
+	// create buffer object
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+	glGenBuffers(1, &vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, NULL);
+	glEnableVertexAttribArray(0);
+	// initialize buffer object
+	glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
+
+	// create OpenCL buffer from GL VBO
+	vbo_cl = clCreateFromGLBuffer(cxGPUContext, CL_MEM_WRITE_ONLY, vbo, NULL);
+	// vbo_cl = clCreateBuffer(cxGPUContext, CL_MEM_WRITE_ONLY, size, NULL, &ciErrNum);
+
+	// set the args values
+	ciErrNum = clSetKernelArg(ckKernel, 0, sizeof(cl_mem), (void *)&vbo_cl);
+	ciErrNum |= clSetKernelArg(ckKernel, 1, sizeof(unsigned int), &mesh_width);
+	ciErrNum |= clSetKernelArg(ckKernel, 2, sizeof(unsigned int), &mesh_height);
 
 	while (!glfwWindowShouldClose(window))
 	{
@@ -157,20 +187,35 @@ int main(void)
 
 		processInput(window);
 
+		runKernel();
 		glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		glPointSize(10);
-		shader.use();
-		// glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 1000.0f);
-		// shader.setMat4("projection", projection);
-		// glm::mat4 view = camera.GetViewMatrix();
-		// shader.setMat4("view", view);
-		// shader.setVec3("viewPos", camera.Position);
-		shader.setVec3("p", glm::vec3(0.0, 0.5, 0.0));
-		// shader.setMat4("model", buf.mat);
-		glBindVertexArray(buf.VAO);
-		glDrawArrays(GL_POINTS, 0, 1);
+		glPointSize(1);
 
+		shader.use();
+		glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 1000.0f);
+		shader.setMat4("projection", projection);
+		glm::mat4 view = camera.GetViewMatrix();
+		shader.setMat4("view", view);
+		// shader.setVec3("viewPos", camera.Position);
+		//  shader.setMat4("model", buf.mat);
+
+		// glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+		// glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 3 * mesh_width * mesh_height, NULL, GL_STREAM_DRAW);
+		glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), 0);
+		//   printf("%d\n", vbo);
+		//  glBufferData(GL_ARRAY_BUFFER, 3 * sizeof(float), &pos[0], GL_STATIC_DRAW);
+		//   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+		glEnableVertexAttribArray(0);
+		//  shader.setMat4("model", buf.mat);
+		glBindVertexArray(vao);
+		//  glDrawArrays(GL_POINTS, 0, 1);
+		// glBindVertexArray(vao);
+		glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
+		glBindVertexArray(0);
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 	}
@@ -324,85 +369,66 @@ cl_int getPlatformID(cl_platform_id *clSelectedPlatformID)
 	return CL_SUCCESS;
 }
 
-/*int main()
+void runKernel()
 {
-	//get all platforms (drivers)
-	std::vector<cl::Platform> all_platforms;
-	cl::Platform::get(&all_platforms);
-	if (all_platforms.size() == 0)
+	ciErrNum = CL_SUCCESS;
+
+	// map OpenGL buffer object for writing from OpenCL
+	glFinish();
+	ciErrNum = clEnqueueAcquireGLObjects(cqCommandQueue, 1, &vbo_cl, 0, 0, 0);
+
+	// Set arg 3 and execute the kernel
+	ciErrNum = clSetKernelArg(ckKernel, 3, sizeof(float), &lastFrame);
+	ciErrNum |= clEnqueueNDRangeKernel(cqCommandQueue, ckKernel, 2, NULL, szGlobalWorkSize, NULL, 0, 0, 0);
+
+	// unmap buffer object
+	ciErrNum = clEnqueueReleaseGLObjects(cqCommandQueue, 1, &vbo_cl, 0, 0, 0);
+	clFinish(cqCommandQueue);
+}
+
+char *oclLoadProgSource(const char *cFilename, const char *cPreamble, size_t *szFinalLength)
+{
+	// locals
+	FILE *pFileStream = NULL;
+	size_t szSourceLength;
+
+// open the OpenCL source code file
+#ifdef _WIN32 // Windows version
+	if (fopen_s(&pFileStream, cFilename, "rb") != 0)
 	{
-		std::cout << " No platforms found. Check OpenCL installation!\n";
-		exit(1);
+		return NULL;
 	}
-	cl::Platform default_platform = all_platforms[0];
-	std::cout << "Using platform: " << default_platform.getInfo<CL_PLATFORM_NAME>() << "\n";
-
-	//get default device of the default platform
-	std::vector<cl::Device> all_devices;
-	default_platform.getDevices(CL_DEVICE_TYPE_ALL, &all_devices);
-	if (all_devices.size() == 0)
+#else // Linux version
+	pFileStream = fopen(cFilename, "rb");
+	if (pFileStream == 0)
 	{
-		std::cout << " No devices found. Check OpenCL installation!\n";
-		exit(1);
+		return NULL;
 	}
-	cl::Device default_device = all_devices[0];
-	std::cout << "Using device: " << default_device.getInfo<CL_DEVICE_NAME>() << "\n";
+#endif
 
-	cl::Context context({default_device});
+	size_t szPreambleLength = strlen(cPreamble);
 
-	cl::Program::Sources sources;
+	// get the length of the source code
+	fseek(pFileStream, 0, SEEK_END);
+	szSourceLength = ftell(pFileStream);
+	fseek(pFileStream, 0, SEEK_SET);
 
-	// kernel calculates for each element C=A+B
-	std::string kernel_code =
-		"   void kernel simple_add(global const int* A, global const int* B, global int* C){       "
-		"       C[get_global_id(0)]=A[get_global_id(0)]+B[get_global_id(0)];                 "
-		"   }                                                                               ";
-	sources.push_back({kernel_code.c_str(), kernel_code.length()});
-
-	cl::Program program(context, sources);
-	if (program.build({default_device}) != CL_SUCCESS)
+	// allocate a buffer for the source code string and read it in
+	char *cSourceString = (char *)malloc(szSourceLength + szPreambleLength + 1);
+	memcpy(cSourceString, cPreamble, szPreambleLength);
+	if (fread((cSourceString) + szPreambleLength, szSourceLength, 1, pFileStream) != 1)
 	{
-		std::cout << " Error building: " << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(default_device) << "\n";
-		exit(1);
-	}
-
-	// create buffers on the device
-	cl::Buffer buffer_A(context, CL_MEM_READ_WRITE, sizeof(int) * 10);
-	cl::Buffer buffer_B(context, CL_MEM_READ_WRITE, sizeof(int) * 10);
-	cl::Buffer buffer_C(context, CL_MEM_READ_WRITE, sizeof(int) * 10);
-
-	int A[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-	int B[] = {0, 1, 2, 0, 1, 2, 0, 1, 2, 0};
-
-	//create queue to which we will push commands for the device.
-	cl::CommandQueue queue(context, default_device);
-
-	//write arrays A and B to the device
-	queue.enqueueWriteBuffer(buffer_A, CL_TRUE, 0, sizeof(int) * 10, A);
-	queue.enqueueWriteBuffer(buffer_B, CL_TRUE, 0, sizeof(int) * 10, B);
-
-	//run the kernel
-
-	//cl::KernelFunctor simple_add(cl::Kernel(program, "simple_add"), queue, cl::NullRange, cl::NDRange(10), cl::NullRange);
-	//simple_add(buffer_A, buffer_B, buffer_C);
-
-	//alternative way to run the kernel
-	cl::Kernel kernel_add = cl::Kernel(program, "simple_add");
-	kernel_add.setArg(0, buffer_A);
-	kernel_add.setArg(1, buffer_B);
-	kernel_add.setArg(2, buffer_C);
-	queue.enqueueNDRangeKernel(kernel_add, cl::NullRange, cl::NDRange(10), cl::NullRange);
-	queue.finish();
-
-	int C[10];
-	//read result C from the device to array C
-	queue.enqueueReadBuffer(buffer_C, CL_TRUE, 0, sizeof(int) * 10, C);
-
-	std::cout << " result: \n";
-	for (int i = 0; i < 10; i++)
-	{
-		std::cout << C[i] << " ";
+		fclose(pFileStream);
+		free(cSourceString);
+		return 0;
 	}
 
-	return 0;
-}*/
+	// close the file and return the total length of the combined (preamble + source) string
+	fclose(pFileStream);
+	if (szFinalLength != 0)
+	{
+		*szFinalLength = szSourceLength + szPreambleLength;
+	}
+	cSourceString[szSourceLength + szPreambleLength] = '\0';
+	return cSourceString;
+}
