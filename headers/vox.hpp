@@ -7,13 +7,17 @@
 #define NOMINMAX
 #include <windows.h>
 #endif
-#ifdef __APPLE__
-#include <OpenCL/cl.h>
-#else
-#include <CL/cl.h>
-#include <CL/cl_gl.h>
-#include <oclUtils.h>
+#if defined(__APPLE__) || defined(MACOSX)
+#include <OpenGL/OpenGL.h>
 #endif
+
+//#ifdef __APPLE__
+#include <OpenCL/cl.h>
+//#else
+#include <CL/cl.h>
+//#include <CL/cl_gl.h>
+#include <oclUtils.h>
+//#endif
 #if defined(__APPLE__) || defined(MACOSX)
 #define GL_SHARING_EXTENSION "cl_APPLE_gl_sharing"
 #else
